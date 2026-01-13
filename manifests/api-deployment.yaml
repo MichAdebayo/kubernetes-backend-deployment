@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: brief-api
+  namespace: brief-ns
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: brief-api
+  template:
+    metadata:
+      labels:
+        app: brief-api
+    spec:
+      containers:
+        - name: brief-api
+          image: sengsathit/brief-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: mysql-service
+            - name: DB_PORT
+              value: "3306"
+            - name: MYSQL_HOST
+              value: mysql-service
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DB
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+            - name: HOST
+              value: 0.0.0.0
+            - name: APPLICATION_ROOT
+              value: /brief-ns
+            - name: DB_CREDENTIALS_DIR
+              value: /etc/secrets/mysql
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: mysql-secret-vol
+              mountPath: /etc/secrets/mysql
+              readOnly: true
+      volumes:
+        - name: mysql-secret-vol
+          secret:
+            secretName: mysql-secret

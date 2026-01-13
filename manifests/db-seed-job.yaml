@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-seed-clients
+  namespace: brief-ns
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mysql-client
+          image: mysql:8.0
+          env:
+            - name: MYSQL_HOST
+              value: mysql-service
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Seeding clients table..."
+              mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" <<'SQL'
+              INSERT INTO clients (first_name, last_name, email)
+              VALUES
+                ('Ada', 'Lovelace', 'ada@example.com'),
+                ('Alan', 'Turing', 'alan@example.com'),
+                ('Grace', 'Hopper', 'grace@example.com'),
+                ('Linus', 'Torvalds', 'linus@example.com'),
+                ('Margaret', 'Hamilton', 'margaret@example.com'),
+                ('Tim', 'Berners-Lee', 'tim@example.com'),
+                ('Ken', 'Thompson', 'ken@example.com'),
+                ('Dennis', 'Ritchie', 'dennis@example.com'),
+                ('Barbara', 'Liskov', 'barbara@example.com'),
+                ('Guido', 'van Rossum', 'guido@example.com'),
+                ('James', 'Gosling', 'james@example.com'),
+                ('Bjarne', 'Stroustrup', 'bjarne@example.com'),
+                ('Yukihiro', 'Matsumoto', 'matz@example.com'),
+                ('Brendan', 'Eich', 'brendan@example.com'),
+                ('Edsger', 'Dijkstra', 'edsger@example.com'),
+                ('Donald', 'Knuth', 'donald@example.com'),
+                ('John', 'Backus', 'john@example.com'),
+                ('Adele', 'Goldberg', 'adele@example.com'),
+                ('Radia', 'Perlman', 'radia@example.com'),
+                ('Leslie', 'Lamport', 'leslie@example.com');
+              SQL
+              echo "Seed complete."
