@@ -134,22 +134,108 @@ curl http://localhost:8081/brief-ns/clients
 
 ---
 
-## 📁 Repository structure
+## 📁 Repository work tree
 
 ```
-README.md
-manifests/
-  namespace.yaml
-  secret-mysql.yaml
-  pvc-mysql.yaml
-  mysql-deployment.yaml
-  mysql-service.yaml
-  api-deployment.yaml
-  api-service.yaml
-  ingress.yaml
-  db-init-job.yaml
-  db-seed-job.yaml
+.
+├── README.md
+├── Makefile
+├── scripts
+│   ├── cluster-up.sh        # Create kind cluster, install ingress, deploy manifests, seed DB, run checks
+│   ├── cluster-down.sh      # Stop/delete local cluster (kind/docker-desktop)
+│   └── full-teardown.sh     # Delete namespace, PVs, ingress; optionally delete cluster
+└── manifests
+    ├── namespace.yaml
+    ├── secret-mysql.yaml
+    ├── pvc-mysql.yaml
+    ├── mysql-deployment.yaml
+    ├── mysql-service.yaml
+    ├── api-deployment.yaml
+    ├── api-service.yaml
+    ├── ingress.yaml
+    ├── db-init-job.yaml
+    └── db-seed-job.yaml
+
 ```
+
+---
+
+## 🛠 Scripts, Makefile & .env (how to run)
+
+This project supports a `.env` file for non-sensitive configuration (cluster name, namespace, ingress namespace). Create a `.env` from the provided template and keep the real `.env` out of Git:
+
+```bash
+cp .env.example .env
+# edit .env to your needs
+```
+
+**Important:** Do not store secrets (passwords) in `.env` if you will commit to a shared repo. Use Kubernetes Secrets instead (`manifests/secret-mysql.yaml`) or use external secret managers for production.
+
+### How scripts load configuration
+All shell scripts automatically source `.env` if present and export the values, so you can set `CLUSTER_NAME`, `NAMESPACE`, etc. there instead of editing scripts.
+
+
+Quick commands (make sure scripts are executable):
+
+```bash
+chmod +x scripts/*.sh
+```
+
+Using the Makefile (convenient shortcuts):
+
+- Start cluster and deploy everything:
+
+```bash
+make up
+```
+
+- Start stack but skip installing ingress (if already installed):
+
+```bash
+make up-no-ingress
+```
+
+- Seed or initialize DB only:
+
+```bash
+make init   # runs db-init-job
+make seed   # runs db-seed-job (20 sample clients)
+```
+
+- Run quick service-level tests (port-forward + curl):
+
+```bash
+make test
+```
+
+- Stop / delete the local kind cluster:
+
+```bash
+make down
+```
+
+- Full teardown (delete namespace, PVs, ingress) and cluster removal:
+
+```bash
+make teardown
+```
+
+- Clean Docker images related to this project:
+
+```bash
+# interactive; will ask confirmation
+make clean-images
+# delete kind node images and prune (be careful)
+./scripts/clean-images.sh --delete-kind --prune
+```
+
+- Tail API logs:
+
+```bash
+make logs
+```
+
+These scripts and Makefile targets are designed to let you spin up the entire stack, run the required endpoint checks, and tear everything down when you are done — ideal for short-lived demo runs and grading.
 
 ---
 
