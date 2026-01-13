@@ -1,88 +1,160 @@
-# kubernetes-backend-deployment
+# Kubernetes Backend Deployment 🐳
 
-## Work topics — Explanations and answers
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg?logo=python)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg?logo=docker)](https://www.docker.com/)
+[![Kubernetes](https://img.shields.io/badge/kubernetes-ready-blue.svg?logo=kubernetes)](https://kubernetes.io/)
 
-### Volumes and persistence
+A small, self-contained project that deploys a Python API and a MySQL database on Kubernetes (local or cloud). The repo includes ready-to-use manifests, a training guide, and helper jobs to initialize and seed the database.
 
-- Role of a Volume in a Kubernetes deployment
+---
 
-A Kubernetes Volume provides a directory accessible to one or more containers in a Pod. Volumes decouple storage lifetime from the container process: data written to a volume can outlive a container restart and, when backed by persistent storage, can remain available across Pod rescheduling. Volumes enable stateful workloads (databases, queues) running inside Pods to persist data reliably instead of relying on ephemeral container filesystem storage.
+## 🚀 Overview
 
-- Meaning and implications of `storageClassName` in a `PersistentVolumeClaim`
+This project demonstrates how to deploy a containerized backend composed of:
 
-`storageClassName` in a `PersistentVolumeClaim` (PVC) specifies which StorageClass the PVC should use to bind to a PersistentVolume (PV). A StorageClass encodes the provisioner and parameters used to create volumes (example: `hostPath` for local dev, CSI drivers for cloud disks, or host-local). The chosen StorageClass influences:
+- A Python API (FastAPI + Uvicorn)
+- A MySQL database with persistent storage
+- Kubernetes manifests for Namespace, Secrets, PVC, Deployments, Services, Ingress
+- Jobs to initialize and seed the database for testing
 
-	- the type of backing storage (block vs file), performance characteristics, and replication options;
-	- whether volumes are dynamically provisioned (created on demand) or must be pre-provisioned;
-	- provider-specific features (encryption at rest, snapshot support, IOPS tiers).
+Files of interest:
 
-Omitting `storageClassName` uses the cluster default StorageClass. For local clusters (kind, minikube, Docker Desktop) default classes differ from cloud providers; when you need particular capabilities (e.g., ReadWriteMany, SSD tier), explicitly set the StorageClass.
+- `docs/brief.md` — original brief and requirements
+- `docs/training.md` — step-by-step instructions (local clusters, manifests, tips)
+- `manifests/` — all Kubernetes manifests (namespace, secrets, PVC, deployments, services, ingress)
 
-- What happens if the MySQL Pod is deleted or recreated?
+---
 
-If the MySQL Pod is deleted or recreated but uses a PVC that is bound to a PV with persistent backing, the data directory (mounted from the PVC) remains intact. When the Pod is rescheduled (new Pod created by its Deployment or StatefulSet), Kubernetes re-attaches the same PersistentVolumeClaim to the new Pod, preserving data. If the PVC is ephemeral (no persistent backing) or uses an inappropriate StorageClass, data may be lost.
+## 🏗 Architecture
 
-Note: Pod-level resources (like container-local temp files) are lost on restart; persistent data must be placed on a mounted Volume backed by a PVC.
+- The API and MySQL run as separate Deployments.
+- MySQL uses a PersistentVolumeClaim to persist data.
+- API connects to MySQL via a `ClusterIP` Service (`mysql-service`).
+- An Ingress exposes the API under a path prefix (e.g., `/brief-ns`).
 
-- How a `PersistentVolumeClaim` is bound to a physical volume
+```mermaid
+flowchart TD
+  subgraph Cluster
+    Ingress["Ingress (nginx)\nexposes /brief-ns"]
+    API["Deployment: brief-api\nService: api-service"]
+    MySQL["Deployment: mysql\nService: mysql-service\nPVC: mysql-pvc"]
+  end
 
-Binding happens through the Kubernetes control plane:
+  Ingress -->|/brief-ns/*| API
+  API -->|mysql://mysql-service:3306| MySQL
+```
 
-	1. A user creates a PVC requesting size and access modes. If a matching PV already exists and satisfies the claim, Kubernetes binds them.
-	2. If no PV exists and the requested StorageClass supports dynamic provisioning, the provisioner (CSI driver or in-tree provisioner) creates a new PV according to StorageClass parameters and then binds it to the PVC.
+---
 
-The PV describes the actual backing (e.g., hostPath, iSCSI, AWS EBS, Azure Disk, local SSD) and the PV/PVC binding is recorded by the API server.
+## ✅ Quick local replication (recommended)
 
-- How the cluster provisions or deletes the underlying storage
+These steps create a local Kubernetes environment, install an ingress controller, deploy the manifests, seed the DB and test endpoints.
 
-Provisioning and deletion are handled by the StorageClass provisioner (a CSI driver or legacy in-tree provisioner). For dynamic provisioning:
+Prerequisites (macOS/Linux):
 
-	- When a PVC requests storage, the provisioner creates a volume on the underlying storage system (local disk, network storage, cloud block/storage service) using the parameters in the StorageClass.
-	- When the PVC is deleted (and the PV's `reclaimPolicy` is `Delete`), the provisioner will delete the underlying storage resource. If the `reclaimPolicy` is `Retain`, the PV remains and the admin must manually handle cleanup.
+- Docker Desktop (or Docker + kind/minikube)
+- kubectl (client)
+- helm (for ingress) — optional but recommended
 
-On local development clusters the provisioner may create hostPath or loopback-backed volumes; in production clusters the provisioner will call out to the cloud or storage system to create real block volumes.
+1) Create a local cluster (kind example):
 
-### Ingress and health probes
+```bash
+# install kind if needed
+brew install kind
+# create cluster
+kind create cluster --name brief-cluster
+# ensure kubectl uses the kind context
+kubectl cluster-info --context kind-brief-cluster
+```
 
-- Purpose of an `Ingress` resource in Kubernetes
+2) (Optional) Install nginx ingress (Helm):
 
-An `Ingress` defines rules that map external HTTP(S) requests to Services within the cluster. It lets you expose multiple Services under the same IP or hostname, configure path-based routing, TLS termination, and host-based routing. The Ingress itself is a resource that only describes the desired routing; an Ingress Controller implements those rules and performs the actual traffic handling.
+```bash
+kubectl create namespace ingress-nginx
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx
+kubectl get pods -n ingress-nginx --watch
+```
 
-- Difference between an `Ingress` and an Ingress Controller
+3) Apply manifests (namespace first is included; manifests reference `brief-ns`):
 
-`Ingress` is a Kubernetes API object that declares routing rules. An Ingress Controller is the runtime component (typically a deployment in the cluster) that watches `Ingress` objects and configures a proxy (nginx, Traefik, HAProxy, Envoy, etc.) to implement the routing rules. Without a running Ingress Controller, Ingress objects have no effect.
+```bash
+kubectl apply -f manifests/namespace.yaml
+kubectl apply -f manifests/
+```
 
-- What are liveness and readiness probes, and why are they important?
+4) Initialize database schema and seed sample data (seed creates 20 clients):
 
-Liveness and readiness probes are container-level diagnostics that the kubelet uses to manage Pod lifecycle and traffic routing:
+```bash
+kubectl apply -f manifests/db-init-job.yaml
+kubectl logs -n brief-ns job/db-init-clients
+kubectl delete job db-init-clients -n brief-ns
 
-	- Liveness probe: detects when a container is unhealthy and should be restarted. Useful for recovering from deadlocks or unrecoverable errors inside the process.
-	- Readiness probe: indicates whether a container is ready to receive traffic. Services and Ingress controllers use readiness to decide whether endpoints should receive requests.
+kubectl apply -f manifests/db-seed-job.yaml
+kubectl logs -n brief-ns job/db-seed-clients
+kubectl delete job db-seed-clients -n brief-ns
+```
 
-Using probes avoids sending traffic to a pod that is still initializing or has entered an unhealthy state. They improve availability and enable graceful rolling updates.
+5) Test API endpoints locally (Service port-forward):
 
-- How the path/prefix configured in an Ingress relates to application routes
+```bash
+kubectl port-forward -n brief-ns svc/api-service 8080:80
+# then in another terminal
+curl http://localhost:8080/health
+curl http://localhost:8080/clients
+curl -X POST http://localhost:8080/clients -H "Content-Type: application/json" -d '{"first_name":"Ada","last_name":"Lovelace","email":"ada@example.com"}'
+```
 
-Ingress path rules map HTTP request paths to Services. If your Ingress exposes a path prefix (for example `/your_namespace`), you must ensure the backend service receives the expected path. Two common approaches:
+6) Test via Ingress (port-forward controller locally):
 
-	1. **Rewrite at the Ingress**: Configure the Ingress Controller to strip the prefix before forwarding (for example, nginx `rewrite-target`), so the backend sees `/clients` instead of `/your_namespace/clients`.
-	2. **App-level prefix handling**: Configure the application to serve under the prefix (mount routes under `/your_namespace`) or make the app aware of a `ROOT_PATH` so no rewrite is necessary.
+```bash
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8081:80
+curl http://localhost:8081/brief-ns/health
+curl http://localhost:8081/brief-ns/clients
+```
 
-If neither is configured, requests may return 404s because the backend expects different paths.
+> Note: On cloud clusters, use the Ingress external IP/DNS instead of local port-forward.
 
-- How to configure an application to respect a prefix path behind a proxy/Ingress
+---
 
-There are several techniques:
+## 🔧 Common troubleshooting
 
-	- **Ingress rewrite rule:** Use the Ingress Controller's rewrite annotations (e.g., `nginx.ingress.kubernetes.io/rewrite-target`) to remove the prefix before forwarding.
-	- **Reverse proxy headers:** Ensure the proxy preserves headers like `X-Forwarded-For` and `X-Forwarded-Proto` and the application understands them for URL generation and redirects.
-	- **Application configuration:** Many frameworks support a `SCRIPT_NAME`, `ROOT_PATH`, or `APPLICATION_ROOT` configuration option to set the base path. Configure the app to use this value so it constructs correct routes and links.
-	- **Base URL handling in code:** Prefix all route definitions with the namespace prefix, or mount the application under a subpath in the web framework.
+- Pod crashes / CrashLoopBackOff: `kubectl describe pod -n brief-ns <pod>` and `kubectl logs -n brief-ns <pod>`
+- Image pull issues: check `imagePullPolicy` and registry access, or `kind load docker-image <image>` for local images
+- Secrets: do not commit plaintext secrets to git. Use `manifests/secret-mysql.yaml` for example and replace values before production.
 
-Choose the approach that best fits your control over the app or the Ingress. For third-party or hard-to-change apps, using the Ingress rewrite is often easiest.
+---
 
-- How the Ingress controller determines whether a backend service is "healthy"
+## 🧪 Tests to verify brief requirements
 
-Ingress controllers typically rely on Kubernetes Endpoints and the readiness state of the Pods backing a Service. The controller queries the Service's endpoints and only forwards traffic to endpoints that are marked ready by the kubelet (i.e., their readinessProbe passed). Some Ingress implementations also support active health checks performed by the proxy itself; others pass traffic only to endpoints reported by the Kubernetes API.
+- Health probe: `GET /brief-ns/health` via Ingress or `GET /health` via Service
+- CRUD clients: `GET/POST/GET/{id}/DELETE` under `/brief-ns/clients` (test via port-forward or Ingress)
 
-Therefore, correct readiness probes are the primary mechanism to control traffic routing: if a Pod is not ready, the Service's endpoints will exclude it and the Ingress controller will not route requests to it.
+---
+
+## 📁 Repository structure
+
+```
+README.md
+manifests/
+  namespace.yaml
+  secret-mysql.yaml
+  pvc-mysql.yaml
+  mysql-deployment.yaml
+  mysql-service.yaml
+  api-deployment.yaml
+  api-service.yaml
+  ingress.yaml
+  db-init-job.yaml
+  db-seed-job.yaml
+```
+
+---
+
+## ⚠️ Security & production notes
+
+- Use managed secrets (Vault, SealedSecrets, ExternalSecrets) for production
+- Use NetworkPolicies and RBAC to limit access
+- Use resource requests/limits and readiness/liveness probes to ensure safe rollouts
