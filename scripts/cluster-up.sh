@@ -212,52 +212,71 @@ if ! curl -sSf "$BASE_URL/health" >/dev/null 2>&1; then
 fi
 
 echo "Checking health..."
-if ! curl -sSf "$BASE_URL/health" >/dev/null 2>&1; then
-  echo "Health check failed at $BASE_URL/health"
-  exit 1
+HTTP_CODE=$(curl -s -o /tmp/health_resp -w "%{http_code}" "$BASE_URL/health" || true)
+if [[ "$HTTP_CODE" != "200" ]]; then
+  echo "Health check failed (status $HTTP_CODE). Response:"; cat /tmp/health_resp || true; exit 1
 fi
+echo "Health check passed (status $HTTP_CODE). Response:"
+cat /tmp/health_resp || true
 
 echo "Listing clients..."
-if ! curl -sSf "$BASE_URL/clients" >/dev/null 2>&1; then
-  echo "GET /clients failed"
-  exit 1
+CLIENTS_HTTP=$(curl -s -o /tmp/clients_resp -w "%{http_code}" "$BASE_URL/clients" || true)
+if [[ "$CLIENTS_HTTP" != "200" ]]; then
+  echo "GET /clients failed (status $CLIENTS_HTTP). Response:"; cat /tmp/clients_resp || true; exit 1
+fi
+echo "GET /clients returned status $CLIENTS_HTTP. Response (first 10 items):"
+if command -v jq >/dev/null 2>&1; then
+  jq '.[0:10]' /tmp/clients_resp || cat /tmp/clients_resp
+else
+  cat /tmp/clients_resp
 fi
 
 # Create a test client
 echo "Creating a test client..."
 PAYLOAD='{"first_name":"Test","last_name":"Runner","email":"test+runner@example.com"}'
-POST_HTTP=$(curl -s -o /tmp/resp -w "%{http_code}" -X POST "$BASE_URL/clients" -H "Content-Type: application/json" -d "$PAYLOAD")
+POST_HTTP=$(curl -s -o /tmp/resp -w "%{http_code}" -X POST "$BASE_URL/clients" -H "Content-Type: application/json" -d "$PAYLOAD" || true)
+echo "POST /clients returned status $POST_HTTP. Response body:"
+cat /tmp/resp || true
 if [[ "$POST_HTTP" != "200" && "$POST_HTTP" != "201" ]]; then
-  echo "POST /clients failed (status $POST_HTTP). Response:"; cat /tmp/resp; exit 1
+  echo "POST /clients failed (status $POST_HTTP)."; exit 1
 fi
 
 # Confirm client exists
-COUNT_BEFORE=$(curl -s "$BASE_URL/clients" | jq '. | length' || echo "0")
-if [[ -z "$COUNT_BEFORE" || "$COUNT_BEFORE" -lt 1 ]]; then
-  echo "No clients found after create. Output:"; curl -s "$BASE_URL/clients"; exit 1
+COUNT_BEFORE=$(jq '. | length' /tmp/clients_resp || echo "0")
+# re-fetch clients to include the new one
+curl -s -o /tmp/clients_after_resp "$BASE_URL/clients" || true
+COUNT_AFTER=$(jq '. | length' /tmp/clients_after_resp || echo "0")
+echo "Clients count: before=$COUNT_BEFORE, after=$COUNT_AFTER"
+if [[ -z "$COUNT_AFTER" || "$COUNT_AFTER" -lt 1 ]]; then
+  echo "No clients found after create. Output:"; cat /tmp/clients_after_resp; exit 1
 fi
 
 # Fetch first client id
-FIRST_ID=$(curl -s "$BASE_URL/clients" | jq '.[0].id' || echo "")
+FIRST_ID=$(jq '.[0].id' /tmp/clients_after_resp || echo "")
 if [[ -z "$FIRST_ID" ]]; then
   echo "Could not find an id for first client"; exit 1
 fi
+echo "First client id: $FIRST_ID"
 
 # Get by id
-if ! curl -sSf "$BASE_URL/clients/$FIRST_ID" >/dev/null 2>&1; then
-  echo "GET /clients/$FIRST_ID failed"; exit 1
+GET_HTTP=$(curl -s -o /tmp/get_resp -w "%{http_code}" "$BASE_URL/clients/$FIRST_ID" || true)
+if [[ "$GET_HTTP" != "200" ]]; then
+  echo "GET /clients/$FIRST_ID failed (status $GET_HTTP). Response:"; cat /tmp/get_resp; exit 1
 fi
+echo "GET /clients/$FIRST_ID succeeded (status $GET_HTTP). Response:"; cat /tmp/get_resp
 
 # Delete by id
-DEL_HTTP=$(curl -s -o /tmp/dresp -w "%{http_code}" -X DELETE "$BASE_URL/clients/$FIRST_ID")
+DEL_HTTP=$(curl -s -o /tmp/dresp -w "%{http_code}" -X DELETE "$BASE_URL/clients/$FIRST_ID" || true)
+echo "DELETE /clients/$FIRST_ID returned status $DEL_HTTP. Response:"; cat /tmp/dresp || true
 if [[ "$DEL_HTTP" == "200" || "$DEL_HTTP" == "204" ]]; then
   echo "Delete succeeded for id $FIRST_ID"
 else
-  echo "DELETE /clients/$FIRST_ID failed (status $DEL_HTTP). Response:"; cat /tmp/dresp; exit 1
+  echo "DELETE /clients/$FIRST_ID failed (status $DEL_HTTP)."; exit 1
 fi
 
 # Final sanity: list clients
-curl -s "$BASE_URL/clients" | jq '. | length' || true
+curl -s "$BASE_URL/clients" -o /tmp/clients_final_resp || true
+echo "Final clients count:"; jq '. | length' /tmp/clients_final_resp || cat /tmp/clients_final_resp
 
 echo "All checks passed. Cluster is up and endpoints are working."
 
