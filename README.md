@@ -244,3 +244,6 @@ These scripts and Makefile targets are designed to let you spin up the entire st
 - Use managed secrets (Vault, SealedSecrets, ExternalSecrets) for production
 - Use NetworkPolicies and RBAC to limit access
 - Use resource requests/limits and readiness/liveness probes to ensure safe rollouts
+
+## Author 
+[Michael Adebayo](www.github.com/MichAdebayo)
